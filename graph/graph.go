@@ -93,6 +93,8 @@ func (g *MessageGraph) SetEntryPoint(name string) {
 type Runnable struct {
 	// graph is the underlying MessageGraph object.
 	graph *MessageGraph
+	// tracer is the optional tracer for observability
+	tracer *Tracer
 }
 
 // Compile compiles the message graph and returns a Runnable instance.
@@ -103,8 +105,22 @@ func (g *MessageGraph) Compile() (*Runnable, error) {
 	}
 
 	return &Runnable{
-		graph: g,
+		graph:  g,
+		tracer: nil, // Initialize with no tracer
 	}, nil
+}
+
+// SetTracer sets a tracer for observability
+func (r *Runnable) SetTracer(tracer *Tracer) {
+	r.tracer = tracer
+}
+
+// WithTracer returns a new Runnable with the given tracer
+func (r *Runnable) WithTracer(tracer *Tracer) *Runnable {
+	return &Runnable{
+		graph:  r.graph,
+		tracer: tracer,
+	}
 }
 
 // Invoke executes the compiled message graph with the given input state.
@@ -112,6 +128,13 @@ func (g *MessageGraph) Compile() (*Runnable, error) {
 func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interface{}, error) {
 	state := initialState
 	currentNode := r.graph.entryPoint
+
+	// Start graph tracing if tracer is set
+	var graphSpan *TraceSpan
+	if r.tracer != nil {
+		graphSpan = r.tracer.StartSpan(ctx, TraceEventGraphStart, "graph")
+		graphSpan.State = initialState
+	}
 
 	for {
 		if currentNode == END {
@@ -123,35 +146,74 @@ func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interf
 			return nil, fmt.Errorf("%w: %s", ErrNodeNotFound, currentNode)
 		}
 
+		// Start node tracing
+		var nodeSpan *TraceSpan
+		if r.tracer != nil {
+			nodeSpan = r.tracer.StartSpan(ctx, TraceEventNodeStart, currentNode)
+			nodeSpan.State = state
+		}
+
 		var err error
 		state, err = node.Function(ctx, state)
+		
+		// End node tracing
+		if r.tracer != nil && nodeSpan != nil {
+			if err != nil {
+				r.tracer.EndSpan(ctx, nodeSpan, state, err)
+				// Also emit error event
+				errorSpan := r.tracer.StartSpan(ctx, TraceEventNodeError, currentNode)
+				errorSpan.Error = err
+				errorSpan.State = state
+				r.tracer.EndSpan(ctx, errorSpan, state, err)
+			} else {
+				r.tracer.EndSpan(ctx, nodeSpan, state, nil)
+			}
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("error in node %s: %w", currentNode, err)
 		}
 
+		// Determine next node
+		var nextNode string
+		
 		// First check for conditional edges
 		nextNodeFn, hasConditional := r.graph.conditionalEdges[currentNode]
 		if hasConditional {
-			currentNode = nextNodeFn(ctx, state)
-			if currentNode == "" {
+			nextNode = nextNodeFn(ctx, state)
+			if nextNode == "" {
 				return nil, fmt.Errorf("conditional edge returned empty next node from %s", currentNode)
 			}
-			continue
-		}
+		} else {
+			// Then check regular edges
+			foundNext := false
+			for _, edge := range r.graph.edges {
+				if edge.From == currentNode {
+					nextNode = edge.To
+					foundNext = true
+					break
+				}
+			}
 
-		// Then check regular edges
-		foundNext := false
-		for _, edge := range r.graph.edges {
-			if edge.From == currentNode {
-				currentNode = edge.To
-				foundNext = true
-				break
+			if !foundNext {
+				return nil, fmt.Errorf("%w: %s", ErrNoOutgoingEdge, currentNode)
 			}
 		}
 
-		if !foundNext {
-			return nil, fmt.Errorf("%w: %s", ErrNoOutgoingEdge, currentNode)
+		// Trace edge traversal
+		if r.tracer != nil && nextNode != "" && nextNode != END {
+			edgeSpan := r.tracer.StartSpan(ctx, TraceEventEdgeTraversal, fmt.Sprintf("%s->%s", currentNode, nextNode))
+			edgeSpan.FromNode = currentNode
+			edgeSpan.ToNode = nextNode
+			r.tracer.EndSpan(ctx, edgeSpan, state, nil)
 		}
+
+		currentNode = nextNode
+	}
+
+	// End graph tracing
+	if r.tracer != nil && graphSpan != nil {
+		r.tracer.EndSpan(ctx, graphSpan, state, nil)
 	}
 
 	return state, nil
