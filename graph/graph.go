@@ -47,6 +47,9 @@ type MessageGraph struct {
 	// edges is a slice of Edge objects representing the connections between nodes.
 	edges []Edge
 
+	// conditionalEdges contains a map between "From" node, while "To" node is derived based on the condition.
+	conditionalEdges map[string]func(ctx context.Context, state interface{}) string
+
 	// entryPoint is the name of the entry point node in the graph.
 	entryPoint string
 }
@@ -54,7 +57,8 @@ type MessageGraph struct {
 // NewMessageGraph creates a new instance of MessageGraph.
 func NewMessageGraph() *MessageGraph {
 	return &MessageGraph{
-		nodes: make(map[string]Node),
+		nodes:            make(map[string]Node),
+		conditionalEdges: make(map[string]func(ctx context.Context, state interface{}) string),
 	}
 }
 
@@ -72,6 +76,12 @@ func (g *MessageGraph) AddEdge(from, to string) {
 		From: from,
 		To:   to,
 	})
+}
+
+// AddConditionalEdge adds a conditional edge where the target node is determined at runtime.
+// The condition function receives the current state and returns the name of the next node.
+func (g *MessageGraph) AddConditionalEdge(from string, condition func(ctx context.Context, state interface{}) string) {
+	g.conditionalEdges[from] = condition
 }
 
 // SetEntryPoint sets the entry point node name for the message graph.
@@ -119,6 +129,17 @@ func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interf
 			return nil, fmt.Errorf("error in node %s: %w", currentNode, err)
 		}
 
+		// First check for conditional edges
+		nextNodeFn, hasConditional := r.graph.conditionalEdges[currentNode]
+		if hasConditional {
+			currentNode = nextNodeFn(ctx, state)
+			if currentNode == "" {
+				return nil, fmt.Errorf("conditional edge returned empty next node from %s", currentNode)
+			}
+			continue
+		}
+
+		// Then check regular edges
 		foundNext := false
 		for _, edge := range r.graph.edges {
 			if edge.From == currentNode {

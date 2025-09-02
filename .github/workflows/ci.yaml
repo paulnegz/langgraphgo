@@ -20,10 +20,11 @@ jobs:
           cache: false
       - uses: actions/checkout@v3
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3.7.0
+        uses: golangci/golangci-lint-action@v6
         with:
-          args: --timeout=4m
-          version: v1.57.1
+          args: --timeout=5m --config=.golangci.yaml
+          version: latest
+          working-directory: .
   build:
     runs-on: ubuntu-latest
     steps:

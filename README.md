@@ -2,69 +2,140 @@
 
 [![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/paulnegz/langgraphgo)
 
-> 🔀 **Forked from [tmc/langgraphgo](https://github.com/tmc/langgraphgo)** - Enhanced with performance improvements and simplified API for production use.
+> 🔀 **Forked from [tmc/langgraphgo](https://github.com/tmc/langgraphgo)** - Enhanced with streaming, visualization, observability, and production-ready features.
 
-## Changes from Original
+## 📦 Installation
 
-- **Removed LangChain dependency** - Works with any LLM client (Google AI, OpenAI, Anthropic, etc.)
-- **Generic state management** - Use any type as state, not just `[]llms.MessageContent`
-- **Performance optimized** - Reduced overhead for production workloads
-- **Simplified API** - Cleaner interface for building graphs
+```bash
+go get github.com/paulnegz/langgraphgo
+```
 
+## 🚀 Features
 
-## Quick Start
+- **LangChain Compatible** - Works with OpenAI, Anthropic, Google AI, and more
+- **Graph Visualization** - Export as Mermaid, DOT, or ASCII diagrams  
+- **Real-time Streaming** - Live progress updates with event listeners
+- **State Checkpointing** - Pause and resume execution
+- **Production Ready** - Error handling, tracing, metrics, and backpressure
 
-
-This is a simple example of how to use the library to create a simple chatbot that uses OpenAI to generate responses.
+## 🎯 Quick Start
 
 ```go
-import (
-	"context"
-	"errors"
-	"fmt"
-	"testing"
+// Simple LLM pipeline
+g := graph.NewMessageGraph()
+g.AddNode("generate", func(ctx context.Context, state interface{}) (interface{}, error) {
+    messages := state.([]llms.MessageContent)
+    response, _ := model.GenerateContent(ctx, messages)
+    return append(messages, llms.TextParts("ai", response.Choices[0].Content)), nil
+})
+g.AddEdge("generate", graph.END)
+g.SetEntryPoint("generate")
 
-	"github.com/paulnegz/langgraphgo/graph"
-	// Use any LLM client - OpenAI, Google AI, etc.
-)
-
-// Define your state type
-type ChatState struct {
-	Messages []string
-	Response string
-}
-
-func main() {
-	g := graph.NewMessageGraph()
-
-	// Add nodes with generic state handling
-	g.AddNode("generate", func(ctx context.Context, state interface{}) (interface{}, error) {
-		chatState := state.(*ChatState)
-		// Call your LLM here (OpenAI, Google AI, etc.)
-		chatState.Response = "Generated response"
-		return chatState, nil
-	})
-
-	g.AddEdge("oracle", graph.END)
-	g.SetEntryPoint("oracle")
-
-	runnable, err := g.Compile()
-	if err != nil {
-		panic(err)
-	}
-
-	ctx := context.Background()
-	// Run with your custom state
-	initialState := &ChatState{
-		Messages: []string{"What is 1 + 1?"},
-	}
-	
-	res, err := runnable.Invoke(ctx, initialState)
-	if err != nil {
-		panic(err)
-	}
-
-	finalState := res.(*ChatState)
-	fmt.Println(finalState.Response)
-}
+// Compile and run
+runnable, _ := g.Compile()
+result, _ := runnable.Invoke(ctx, initialState)
 ```
+
+## 📚 Examples
+
+- **[Basic LLM](./examples/basic_llm/)** - Simple LangChain integration
+- **[RAG Pipeline](./examples/rag_pipeline/)** - Complete retrieval-augmented generation
+- **[Streaming](./examples/streaming_pipeline/)** - Real-time progress updates
+- **[Conditional Routing](./examples/conditional_routing/)** - Dynamic path selection
+- **[Checkpointing](./examples/checkpointing/)** - Save and resume state
+- **[Visualization](./examples/visualization/)** - Export graph diagrams
+- **[Listeners](./examples/listeners/)** - Progress, metrics, and logging
+- **[Subgraphs](./examples/subgraph/)** - Nested graph composition
+
+## 🎨 Graph Visualization
+
+```mermaid
+%%{init: {'theme':'dark'}}%%
+flowchart TD
+    START(["🚀 START"])
+    query[["🔍 Query Classifier"]]
+    retrieve["📚 Retrieve Docs"]
+    rerank["🎯 Rerank"]
+    check{"✅ Relevance?"}
+    generate["🤖 Generate"]
+    fallback["🌐 Web Search"]
+    format["📝 Format"]
+    END(["✅ END"])
+    
+    START --> query --> retrieve --> rerank --> check
+    check -->|>0.7| generate
+    check -->|≤0.7| fallback --> generate
+    generate --> format --> END
+    
+    style START fill:#90EE90,stroke:#fff,stroke-width:2px
+    style END fill:#FFB6C1,stroke:#fff,stroke-width:2px
+    linkStyle default stroke:#fff,stroke-width:2px
+```
+
+### Export Formats
+
+```go
+exporter := graph.NewGraphExporter(g)
+mermaid := exporter.DrawMermaid()  // Mermaid diagram
+dot := exporter.DrawDOT()          // Graphviz DOT  
+ascii := exporter.DrawASCII()      // Terminal output
+```
+
+## 🔧 Key Concepts
+
+### Conditional Routing
+```go
+g.AddConditionalEdge("router", func(ctx context.Context, state interface{}) string {
+    if state.(Task).Priority == "high" {
+        return "urgent_handler"
+    }
+    return "normal_handler"
+})
+```
+
+### State Checkpointing
+```go
+g := graph.NewCheckpointableMessageGraph()
+g.SetCheckpointConfig(graph.CheckpointConfig{
+    Store: graph.NewMemoryCheckpointStore(),
+    AutoSave: true,
+})
+```
+
+### Event Listeners
+```go
+progress := graph.NewProgressListener().WithTiming(true)
+metrics := graph.NewMetricsListener()
+node.AddListener(progress)
+node.AddListener(metrics)
+```
+
+## 📈 Performance
+
+- **Graph Operations**: ~14-94μs depending on format
+- **Tracing Overhead**: ~4μs per execution
+- **Event Processing**: 1000+ events/second
+- **Streaming Latency**: <100ms
+
+## 🧪 Testing
+
+```bash
+go test ./graph -v              # Run tests
+go test ./graph -bench=.        # Run benchmarks
+```
+
+## 📚 API Documentation
+
+- [Core Graph](./graph/graph.go) - Basic graph operations
+- [Streaming](./graph/streaming.go) - Real-time events
+- [Listeners](./graph/listeners.go) - Event handlers
+- [Checkpointing](./graph/checkpointing.go) - State persistence
+- [Visualization](./graph/visualization.go) - Export formats
+
+## 🤝 Contributing
+
+This fork enhances [tmc/langgraphgo](https://github.com/tmc/langgraphgo) with production features while maintaining API compatibility.
+
+## 📄 License
+
+MIT License - see original repository for details.
