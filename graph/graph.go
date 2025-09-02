@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/tmc/langchaingo/llms"
 )
 
 // END is a special constant used to represent the end node in the graph.
@@ -28,8 +26,8 @@ type Node struct {
 	Name string
 
 	// Function is the function associated with the node.
-	// It takes a context and a slice of MessageContent as input and returns a slice of MessageContent and an error.
-	Function func(ctx context.Context, state []llms.MessageContent) ([]llms.MessageContent, error)
+	// It takes a context and any state as input and returns the updated state and an error.
+	Function func(ctx context.Context, state interface{}) (interface{}, error)
 }
 
 // Edge represents an edge in the message graph.
@@ -61,7 +59,7 @@ func NewMessageGraph() *MessageGraph {
 }
 
 // AddNode adds a new node to the message graph with the given name and function.
-func (g *MessageGraph) AddNode(name string, fn func(ctx context.Context, state []llms.MessageContent) ([]llms.MessageContent, error)) {
+func (g *MessageGraph) AddNode(name string, fn func(ctx context.Context, state interface{}) (interface{}, error)) {
 	g.nodes[name] = Node{
 		Name:     name,
 		Function: fn,
@@ -99,12 +97,10 @@ func (g *MessageGraph) Compile() (*Runnable, error) {
 	}, nil
 }
 
-// Invoke executes the compiled message graph with the given input messages.
-// It returns the resulting messages and an error if any occurs during the execution.
-// Invoke executes the compiled message graph with the given input messages.
-// It returns the resulting messages and an error if any occurs during the execution.
-func (r *Runnable) Invoke(ctx context.Context, messages []llms.MessageContent) ([]llms.MessageContent, error) {
-	state := messages
+// Invoke executes the compiled message graph with the given input state.
+// It returns the resulting state and an error if any occurs during the execution.
+func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interface{}, error) {
+	state := initialState
 	currentNode := r.graph.entryPoint
 
 	for {

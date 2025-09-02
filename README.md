@@ -1,6 +1,15 @@
 # 🦜️🔗 LangGraphGo
 
-[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/tmc/langgraphgo)
+[![go.dev reference](https://img.shields.io/badge/go.dev-reference-007d9c?logo=go&logoColor=white&style=flat-square)](https://pkg.go.dev/github.com/paulnegz/langgraphgo)
+
+> 🔀 **Forked from [tmc/langgraphgo](https://github.com/tmc/langgraphgo)** - Enhanced with performance improvements and simplified API for production use.
+
+## Changes from Original
+
+- **Removed LangChain dependency** - Works with any LLM client (Google AI, OpenAI, Anthropic, etc.)
+- **Generic state management** - Use any type as state, not just `[]llms.MessageContent`
+- **Performance optimized** - Reduced overhead for production workloads
+- **Simplified API** - Cleaner interface for building graphs
 
 
 ## Quick Start
@@ -15,32 +24,25 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/tmc/langchaingo/llms"
-	"github.com/tmc/langchaingo/llms/openai"
-	"github.com/tmc/langchaingo/schema"
-	"github.com/tmc/langgraphgo/graph"
+	"github.com/paulnegz/langgraphgo/graph"
+	// Use any LLM client - OpenAI, Google AI, etc.
 )
 
-func main() {
-	model, err := openai.New()
-	if err != nil {
-		panic(err)
-	}
+// Define your state type
+type ChatState struct {
+	Messages []string
+	Response string
+}
 
+func main() {
 	g := graph.NewMessageGraph()
 
-	g.AddNode("oracle", func(ctx context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
-		r, err := model.GenerateContent(ctx, state, llms.WithTemperature(0.0))
-		if err != nil {
-			return nil, err
-		}
-		return append(state,
-			llms.TextParts(schema.ChatMessageTypeAI, r.Choices[0].Content),
-		), nil
-
-	})
-	g.AddNode(graph.END, func(ctx context.Context, state []llms.MessageContent) ([]llms.MessageContent, error) {
-		return state, nil
+	// Add nodes with generic state handling
+	g.AddNode("generate", func(ctx context.Context, state interface{}) (interface{}, error) {
+		chatState := state.(*ChatState)
+		// Call your LLM here (OpenAI, Google AI, etc.)
+		chatState.Response = "Generated response"
+		return chatState, nil
 	})
 
 	g.AddEdge("oracle", graph.END)
@@ -52,17 +54,17 @@ func main() {
 	}
 
 	ctx := context.Background()
-	// Let's run it!
-	res, err := runnable.Invoke(ctx, []llms.MessageContent{
-		llms.TextParts(schema.ChatMessageTypeHuman, "What is 1 + 1?"),
-	})
+	// Run with your custom state
+	initialState := &ChatState{
+		Messages: []string{"What is 1 + 1?"},
+	}
+	
+	res, err := runnable.Invoke(ctx, initialState)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Println(res)
-
-	// Output:
-	// [{human [{What is 1 + 1?}]} {ai [{1 + 1 equals 2.}]}]
+	finalState := res.(*ChatState)
+	fmt.Println(finalState.Response)
 }
 ```
