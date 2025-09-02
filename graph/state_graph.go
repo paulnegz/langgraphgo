@@ -10,16 +10,16 @@ import (
 type StateGraph struct {
 	// nodes is a map of node names to their corresponding Node objects
 	nodes map[string]Node
-	
+
 	// edges is a slice of Edge objects representing the connections between nodes
 	edges []Edge
-	
+
 	// conditionalEdges contains a map between "From" node, while "To" node is derived based on the condition
 	conditionalEdges map[string]func(ctx context.Context, state interface{}) string
-	
+
 	// entryPoint is the name of the entry point node in the graph
 	entryPoint string
-	
+
 	// retryPolicy defines retry behavior for failed nodes
 	retryPolicy *RetryPolicy
 }
@@ -148,20 +148,20 @@ func (r *StateRunnable) Invoke(ctx context.Context, initialState interface{}) (i
 // executeNodeWithRetry executes a node with retry logic based on the retry policy
 func (r *StateRunnable) executeNodeWithRetry(ctx context.Context, node Node, state interface{}) (interface{}, error) {
 	var lastErr error
-	
+
 	maxRetries := 1 // Default: no retries
 	if r.graph.retryPolicy != nil {
 		maxRetries = r.graph.retryPolicy.MaxRetries + 1 // +1 for initial attempt
 	}
-	
+
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		result, err := node.Function(ctx, state)
 		if err == nil {
 			return result, nil
 		}
-		
+
 		lastErr = err
-		
+
 		// Check if error is retryable
 		if r.graph.retryPolicy != nil && attempt < maxRetries-1 {
 			if r.isRetryableError(err) {
@@ -179,11 +179,11 @@ func (r *StateRunnable) executeNodeWithRetry(ctx context.Context, node Node, sta
 				continue
 			}
 		}
-		
+
 		// If not retryable or max retries reached, return error
 		break
 	}
-	
+
 	return nil, lastErr
 }
 
@@ -192,23 +192,23 @@ func (r *StateRunnable) isRetryableError(err error) bool {
 	if r.graph.retryPolicy == nil {
 		return false
 	}
-	
+
 	errorStr := err.Error()
 	for _, retryablePattern := range r.graph.retryPolicy.RetryableErrors {
 		if contains(errorStr, retryablePattern) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
 // contains is a simple string contains check
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || 
-		(len(substr) > 0 && len(s) > len(substr) && 
-		 (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-		  findSubstring(s, substr))))
+	return len(s) >= len(substr) && (s == substr ||
+		(len(substr) > 0 && len(s) > len(substr) &&
+			(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+				findSubstring(s, substr))))
 }
 
 // findSubstring finds if substr exists in s

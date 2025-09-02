@@ -155,7 +155,7 @@ func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interf
 
 		var err error
 		state, err = node.Function(ctx, state)
-		
+
 		// End node tracing
 		if r.tracer != nil && nodeSpan != nil {
 			if err != nil {
@@ -176,7 +176,7 @@ func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interf
 
 		// Determine next node
 		var nextNode string
-		
+
 		// First check for conditional edges
 		nextNodeFn, hasConditional := r.graph.conditionalEdges[currentNode]
 		if hasConditional {
