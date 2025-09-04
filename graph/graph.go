@@ -126,8 +126,30 @@ func (r *Runnable) WithTracer(tracer *Tracer) *Runnable {
 // Invoke executes the compiled message graph with the given input state.
 // It returns the resulting state and an error if any occurs during the execution.
 func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interface{}, error) {
+	return r.InvokeWithConfig(ctx, initialState, nil)
+}
+
+// InvokeWithConfig executes the compiled message graph with the given input state and config.
+// It returns the resulting state and an error if any occurs during the execution.
+func (r *Runnable) InvokeWithConfig(ctx context.Context, initialState interface{}, config *Config) (interface{}, error) {
 	state := initialState
 	currentNode := r.graph.entryPoint
+
+	// Generate run ID for callbacks
+	runID := generateRunID()
+	
+	// Notify callbacks of graph start
+	if config != nil && len(config.Callbacks) > 0 {
+		serialized := map[string]interface{}{
+			"name": "graph",
+			"type": "chain",
+		}
+		inputs := convertStateToMap(initialState)
+		
+		for _, cb := range config.Callbacks {
+			cb.OnChainStart(ctx, serialized, inputs, runID, nil, config.Tags, config.Metadata)
+		}
+	}
 
 	// Start graph tracing if tracer is set
 	var graphSpan *TraceSpan
@@ -171,7 +193,26 @@ func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interf
 		}
 
 		if err != nil {
+			// Notify callbacks of error
+			if config != nil && len(config.Callbacks) > 0 {
+				for _, cb := range config.Callbacks {
+					cb.OnChainError(ctx, err, runID)
+				}
+			}
 			return nil, fmt.Errorf("error in node %s: %w", currentNode, err)
+		}
+		
+		// Notify callbacks of node execution (as tool)
+		if config != nil && len(config.Callbacks) > 0 {
+			nodeRunID := generateRunID()
+			serialized := map[string]interface{}{
+				"name": currentNode,
+				"type": "tool",
+			}
+			for _, cb := range config.Callbacks {
+				cb.OnToolStart(ctx, serialized, convertStateToString(state), nodeRunID, &runID, config.Tags, config.Metadata)
+				cb.OnToolEnd(ctx, convertStateToString(state), nodeRunID)
+			}
 		}
 
 		// Determine next node
@@ -214,6 +255,14 @@ func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interf
 	// End graph tracing
 	if r.tracer != nil && graphSpan != nil {
 		r.tracer.EndSpan(ctx, graphSpan, state, nil)
+	}
+
+	// Notify callbacks of graph end
+	if config != nil && len(config.Callbacks) > 0 {
+		outputs := convertStateToMap(state)
+		for _, cb := range config.Callbacks {
+			cb.OnChainEnd(ctx, outputs, runID)
+		}
 	}
 
 	return state, nil

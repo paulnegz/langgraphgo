@@ -111,20 +111,37 @@ node.AddListener(progress)
 node.AddListener(metrics)
 ```
 
-### Langfuse Tracing
+### Callback Support for Tracing
+
 ```go
-// Set Langfuse credentials
-os.Setenv("LANGFUSE_PUBLIC_KEY", "your-key")
-os.Setenv("LANGFUSE_SECRET_KEY", "your-secret")
+// Create a callback handler (e.g., for Langfuse tracing)
+config := &graph.Config{
+    Callbacks: []graph.CallbackHandler{myCallbackHandler},
+    Tags:      []string{"operation-name"},
+    Metadata: map[string]interface{}{
+        "user_id": "user123",
+        "session_id": "session456",
+    },
+}
 
-// Create tracer with Langfuse hook
-tracer := graph.NewTracer()
-// Add your tracing hooks here
-// tracer.AddHook(yourHook)
+// Invoke with callbacks for automatic tracing
+result, _ := runnable.InvokeWithConfig(ctx, initialState, config)
+```
 
-// Create traced runnable for automatic observability
-tracedRunnable := graph.NewTracedRunnable(runnable, tracer)
-result, _ := tracedRunnable.Invoke(ctx, initialState)
+### Langfuse Integration Example
+
+```go
+// With a Langfuse callback adapter (see langfuse-go for implementation)
+import langfuseCallbacks "github.com/paulnegz/langfuse-go/langchain"
+
+handler := langfuseCallbacks.NewCallbackHandler()
+handler.SetTraceParams("my-operation", "user123", "session456", metadata)
+
+config := &graph.Config{
+    Callbacks: []graph.CallbackHandler{handler},
+}
+
+result, _ := runnable.InvokeWithConfig(ctx, initialState, config)
 ```
 
 ## 📈 Performance
