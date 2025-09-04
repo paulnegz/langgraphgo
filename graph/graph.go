@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-
-	"github.com/tmc/langchaingo/llms"
 )
 
 // END is a special constant used to represent the end node in the graph.
@@ -28,8 +26,8 @@ type Node struct {
 	Name string
 
 	// Function is the function associated with the node.
-	// It takes a context and a slice of MessageContent as input and returns a slice of MessageContent and an error.
-	Function func(ctx context.Context, state []llms.MessageContent) ([]llms.MessageContent, error)
+	// It takes a context and any state as input and returns the updated state and an error.
+	Function func(ctx context.Context, state interface{}) (interface{}, error)
 }
 
 // Edge represents an edge in the message graph.
@@ -49,6 +47,9 @@ type MessageGraph struct {
 	// edges is a slice of Edge objects representing the connections between nodes.
 	edges []Edge
 
+	// conditionalEdges contains a map between "From" node, while "To" node is derived based on the condition.
+	conditionalEdges map[string]func(ctx context.Context, state interface{}) string
+
 	// entryPoint is the name of the entry point node in the graph.
 	entryPoint string
 }
@@ -56,12 +57,13 @@ type MessageGraph struct {
 // NewMessageGraph creates a new instance of MessageGraph.
 func NewMessageGraph() *MessageGraph {
 	return &MessageGraph{
-		nodes: make(map[string]Node),
+		nodes:            make(map[string]Node),
+		conditionalEdges: make(map[string]func(ctx context.Context, state interface{}) string),
 	}
 }
 
 // AddNode adds a new node to the message graph with the given name and function.
-func (g *MessageGraph) AddNode(name string, fn func(ctx context.Context, state []llms.MessageContent) ([]llms.MessageContent, error)) {
+func (g *MessageGraph) AddNode(name string, fn func(ctx context.Context, state interface{}) (interface{}, error)) {
 	g.nodes[name] = Node{
 		Name:     name,
 		Function: fn,
@@ -76,6 +78,12 @@ func (g *MessageGraph) AddEdge(from, to string) {
 	})
 }
 
+// AddConditionalEdge adds a conditional edge where the target node is determined at runtime.
+// The condition function receives the current state and returns the name of the next node.
+func (g *MessageGraph) AddConditionalEdge(from string, condition func(ctx context.Context, state interface{}) string) {
+	g.conditionalEdges[from] = condition
+}
+
 // SetEntryPoint sets the entry point node name for the message graph.
 func (g *MessageGraph) SetEntryPoint(name string) {
 	g.entryPoint = name
@@ -85,6 +93,8 @@ func (g *MessageGraph) SetEntryPoint(name string) {
 type Runnable struct {
 	// graph is the underlying MessageGraph object.
 	graph *MessageGraph
+	// tracer is the optional tracer for observability
+	tracer *Tracer
 }
 
 // Compile compiles the message graph and returns a Runnable instance.
@@ -95,17 +105,36 @@ func (g *MessageGraph) Compile() (*Runnable, error) {
 	}
 
 	return &Runnable{
-		graph: g,
+		graph:  g,
+		tracer: nil, // Initialize with no tracer
 	}, nil
 }
 
-// Invoke executes the compiled message graph with the given input messages.
-// It returns the resulting messages and an error if any occurs during the execution.
-// Invoke executes the compiled message graph with the given input messages.
-// It returns the resulting messages and an error if any occurs during the execution.
-func (r *Runnable) Invoke(ctx context.Context, messages []llms.MessageContent) ([]llms.MessageContent, error) {
-	state := messages
+// SetTracer sets a tracer for observability
+func (r *Runnable) SetTracer(tracer *Tracer) {
+	r.tracer = tracer
+}
+
+// WithTracer returns a new Runnable with the given tracer
+func (r *Runnable) WithTracer(tracer *Tracer) *Runnable {
+	return &Runnable{
+		graph:  r.graph,
+		tracer: tracer,
+	}
+}
+
+// Invoke executes the compiled message graph with the given input state.
+// It returns the resulting state and an error if any occurs during the execution.
+func (r *Runnable) Invoke(ctx context.Context, initialState interface{}) (interface{}, error) {
+	state := initialState
 	currentNode := r.graph.entryPoint
+
+	// Start graph tracing if tracer is set
+	var graphSpan *TraceSpan
+	if r.tracer != nil {
+		graphSpan = r.tracer.StartSpan(ctx, TraceEventGraphStart, "graph")
+		graphSpan.State = initialState
+	}
 
 	for {
 		if currentNode == END {
@@ -117,24 +146,74 @@ func (r *Runnable) Invoke(ctx context.Context, messages []llms.MessageContent) (
 			return nil, fmt.Errorf("%w: %s", ErrNodeNotFound, currentNode)
 		}
 
+		// Start node tracing
+		var nodeSpan *TraceSpan
+		if r.tracer != nil {
+			nodeSpan = r.tracer.StartSpan(ctx, TraceEventNodeStart, currentNode)
+			nodeSpan.State = state
+		}
+
 		var err error
 		state, err = node.Function(ctx, state)
+
+		// End node tracing
+		if r.tracer != nil && nodeSpan != nil {
+			if err != nil {
+				r.tracer.EndSpan(ctx, nodeSpan, state, err)
+				// Also emit error event
+				errorSpan := r.tracer.StartSpan(ctx, TraceEventNodeError, currentNode)
+				errorSpan.Error = err
+				errorSpan.State = state
+				r.tracer.EndSpan(ctx, errorSpan, state, err)
+			} else {
+				r.tracer.EndSpan(ctx, nodeSpan, state, nil)
+			}
+		}
+
 		if err != nil {
 			return nil, fmt.Errorf("error in node %s: %w", currentNode, err)
 		}
 
-		foundNext := false
-		for _, edge := range r.graph.edges {
-			if edge.From == currentNode {
-				currentNode = edge.To
-				foundNext = true
-				break
+		// Determine next node
+		var nextNode string
+
+		// First check for conditional edges
+		nextNodeFn, hasConditional := r.graph.conditionalEdges[currentNode]
+		if hasConditional {
+			nextNode = nextNodeFn(ctx, state)
+			if nextNode == "" {
+				return nil, fmt.Errorf("conditional edge returned empty next node from %s", currentNode)
+			}
+		} else {
+			// Then check regular edges
+			foundNext := false
+			for _, edge := range r.graph.edges {
+				if edge.From == currentNode {
+					nextNode = edge.To
+					foundNext = true
+					break
+				}
+			}
+
+			if !foundNext {
+				return nil, fmt.Errorf("%w: %s", ErrNoOutgoingEdge, currentNode)
 			}
 		}
 
-		if !foundNext {
-			return nil, fmt.Errorf("%w: %s", ErrNoOutgoingEdge, currentNode)
+		// Trace edge traversal
+		if r.tracer != nil && nextNode != "" && nextNode != END {
+			edgeSpan := r.tracer.StartSpan(ctx, TraceEventEdgeTraversal, fmt.Sprintf("%s->%s", currentNode, nextNode))
+			edgeSpan.FromNode = currentNode
+			edgeSpan.ToNode = nextNode
+			r.tracer.EndSpan(ctx, edgeSpan, state, nil)
 		}
+
+		currentNode = nextNode
+	}
+
+	// End graph tracing
+	if r.tracer != nil && graphSpan != nil {
+		r.tracer.EndSpan(ctx, graphSpan, state, nil)
 	}
 
 	return state, nil
