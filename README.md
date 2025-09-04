@@ -47,7 +47,6 @@ result, _ := runnable.Invoke(ctx, initialState)
 - **[Visualization](./examples/visualization/)** - Export graph diagrams
 - **[Listeners](./examples/listeners/)** - Progress, metrics, and logging
 - **[Subgraphs](./examples/subgraph/)** - Nested graph composition
-- **[Langfuse Tracing](./examples/langfuse_tracing.go)** - Automatic workflow observability
 
 ## 🎨 Graph Visualization
 
@@ -120,8 +119,8 @@ os.Setenv("LANGFUSE_SECRET_KEY", "your-secret")
 
 // Create tracer with Langfuse hook
 tracer := graph.NewTracer()
-langfuseHook := graph.NewLangfuseHook()
-tracer.AddHook(langfuseHook)
+// Add your tracing hooks here
+// tracer.AddHook(yourHook)
 
 // Create traced runnable for automatic observability
 tracedRunnable := graph.NewTracedRunnable(runnable, tracer)
@@ -150,7 +149,6 @@ go test ./graph -bench=.        # Run benchmarks
 - [Checkpointing](./graph/checkpointing.go) - State persistence
 - [Visualization](./graph/visualization.go) - Export formats
 - [Tracing](./graph/tracing.go) - Execution tracing infrastructure
-- [Langfuse Hook](./graph/langfuse_hook.go) - Langfuse observability integration
 
 ## 🤝 Contributing
 
