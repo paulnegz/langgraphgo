@@ -137,7 +137,7 @@ func (r *Runnable) InvokeWithConfig(ctx context.Context, initialState interface{
 
 	// Generate run ID for callbacks
 	runID := generateRunID()
-	
+
 	// Notify callbacks of graph start
 	if config != nil && len(config.Callbacks) > 0 {
 		serialized := map[string]interface{}{
@@ -145,7 +145,7 @@ func (r *Runnable) InvokeWithConfig(ctx context.Context, initialState interface{
 			"type": "chain",
 		}
 		inputs := convertStateToMap(initialState)
-		
+
 		for _, cb := range config.Callbacks {
 			cb.OnChainStart(ctx, serialized, inputs, runID, nil, config.Tags, config.Metadata)
 		}
@@ -201,7 +201,7 @@ func (r *Runnable) InvokeWithConfig(ctx context.Context, initialState interface{
 			}
 			return nil, fmt.Errorf("error in node %s: %w", currentNode, err)
 		}
-		
+
 		// Notify callbacks of node execution (as tool)
 		if config != nil && len(config.Callbacks) > 0 {
 			nodeRunID := generateRunID()

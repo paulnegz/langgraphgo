@@ -3,6 +3,7 @@ package graph
 import (
 	"encoding/json"
 	"fmt"
+
 	"github.com/google/uuid"
 )
 
@@ -17,7 +18,7 @@ func convertStateToMap(state interface{}) map[string]interface{} {
 	if m, ok := state.(map[string]interface{}); ok {
 		return m
 	}
-	
+
 	// Try to marshal/unmarshal through JSON
 	data, err := json.Marshal(state)
 	if err != nil {
@@ -25,14 +26,14 @@ func convertStateToMap(state interface{}) map[string]interface{} {
 			"state": fmt.Sprintf("%v", state),
 		}
 	}
-	
+
 	var result map[string]interface{}
 	if err := json.Unmarshal(data, &result); err != nil {
 		return map[string]interface{}{
 			"state": string(data),
 		}
 	}
-	
+
 	return result
 }
 
